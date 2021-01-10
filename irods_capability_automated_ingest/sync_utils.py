@@ -69,6 +69,10 @@ def failures_key(job_name):
     return "failures:/"+job_name
 
 
+def repeats_key(job_name):
+    return "repeats:/"+job_name
+
+
 def retries_key(job_name):
     return "retries:/"+job_name
 

@@ -13,7 +13,7 @@ import redis_lock
 from . import sync_logging, sync_irods
 from .sync_utils import get_redis, app, get_with_key, get_max_retries, tasks_key, set_with_key, decr_with_key, \
     incr_with_key, reset_with_key, cleanup_key, sync_time_key, get_timeout, failures_key, retries_key, get_delay, \
-    count_key, stop_key, dequeue_key, get_hdlr_mod
+    count_key, stop_key, dequeue_key, repeats_key, get_hdlr_mod
 from .utils import retry
 from uuid import uuid1
 import time
@@ -26,15 +26,7 @@ import socket
 from celery.signals import before_task_publish, after_task_publish, task_prerun, task_postrun, task_retry, task_success, task_failure, task_revoked, task_unknown, task_rejected
 from billiard import current_process
 
-import re,logging
-
-# -- dwm - probably do not need
-#
-# @task_revoked.connect()
-# def task_revoke(**kw):
-#    logger = logging.getLogger()
-#    logger.warning("-- TASK_REVOKE -- %r" % kw) 
-
+import re
 
 @task_prerun.connect()
 def task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):
@@ -90,16 +82,25 @@ class IrodsTask(app.Task):
         logger.info('decr_job_name', task=meta["task"], path=meta["path"], job_name=job_name, task_id=task_id, retval=retval)
 
         r = get_redis(config)
-        done = retry(logger, decr_with_key, r, tasks_key, job_name) == 0 and not retry(logger, periodic, r, job_name)
-        if done:
+
+        is_periodic = retry(logger, periodic, r, job_name)
+        is_done = retry(logger, decr_with_key, r, tasks_key, job_name) == 0 and not(is_periodic)
+
+        if is_done:
             retry(logger, cleanup, r, job_name)
 
         r.rpush(dequeue_key(job_name), task_id)
 
-        if done:
-            hdlr_mod = get_hdlr_mod(meta)
-            if hdlr_mod is not None and hasattr(hdlr_mod, "post_job"):
-                hdlr_mod.post_job(hdlr_mod, logger, meta)
+        hdlr_mod = get_hdlr_mod(meta)
+
+        if hdlr_mod is not None:
+
+            if is_periodic or is_done:
+                if hasattr(hdlr_mod, "post_job"): hdlr_mod.post_job(hdlr_mod, logger, meta)
+
+            if is_done:
+                if hasattr(hdlr_mod, "teardown_job"): hdlr_mod.teardown_job(hdlr_mod, logger, meta)
+                reset_with_key( r, repeats_key, job_name )
 
 
 class RestartTask(app.Task):
@@ -150,6 +151,7 @@ def init(r, job_name):
     reset_with_key(r, tasks_key, job_name)
     reset_with_key(r, failures_key, job_name)
     reset_with_key(r, retries_key, job_name)
+    reset_with_key(r, repeats_key, job_name)
 
 
 def interrupt(r, job_name, cli=True, terminate=True):
@@ -173,6 +175,7 @@ def interrupt(r, job_name, cli=True, terminate=True):
 
 
 def cleanup(r, job_name, ):
+
     hdlr = get_with_key(r, cleanup_key, job_name, lambda bs: json.loads(bs.decode("utf-8")))
     for f in hdlr:
         os.remove(f)
@@ -509,23 +512,36 @@ def restart(meta):
     interval = meta["interval"]
     config = meta["config"]
     logging_config = config["log"]
-    if interval is not None:
-        restart.s(meta).apply_async(task_id=job_name, queue=restart_queue, countdown=interval)
 
     logger = sync_logging.get_sync_logger(logging_config)
 
     hdlr_mod = get_hdlr_mod(meta)
 
-    try:
+    r = get_redis(config)
 
+    # On first restart call, so invoke setup_job()
+
+    if interval is not None:
+        incr_with_key(r, repeats_key, job_name)
+        if 1 == get_with_key(r, repeats_key, job_name, int):
+            if hdlr_mod is not None and hasattr(hdlr_mod, "setup_job"):
+                hdlr_mod.setup_job(hdlr_mod, logger, meta)
+
+    try:
         if hdlr_mod is not None and hasattr(hdlr_mod, "pre_job"):
             hdlr_mod.pre_job(hdlr_mod, logger, meta)
+    except Exception as err:
+        logger.error("pre-job threw exception: " + str(err), traceback=traceback.extract_tb(err.__traceback__))
+        raise
+
+    if interval is not None:
+        restart.s(meta).apply_async(task_id=job_name, queue=restart_queue, countdown=interval)
+
+    try:
         logger.info("***************** restart *****************")
-        r = get_redis(config)
 
         if not periodic(r, job_name) or done(r, job_name):
             logger.info("queue empty and worker not busy")
-
             init(r, job_name)
             meta = meta.copy()
             meta["task"] = "sync_path"
