@@ -66,6 +66,7 @@ def handle_start(args):
     data["restart_queue"] = args.restart_queue
     data["path_queue"] = args.path_queue
     data["file_queue"] = args.file_queue
+    data["debug"] = args.debug
     data["target"] = args.target
     data["root"] = args.root
     data["interval"] = args.interval
@@ -105,9 +106,20 @@ def handle_list(args):
     print(json.dumps(jobs))
     return 0
 
+args = None
+def handle_bug(*x,**kw):
+  if not args: print('huh?');exit(127)
+  if getattr(args,"debug",None):
+    print(" debug mode is activated");
+  else:
+    print(" debug mode is NOT activated");
+  exit(123)
+
 
 def main():
     parser = argparse.ArgumentParser(description='continuous synchronization utility')
+# --> dwm1
+    parser.add_argument( '--debug', action="store_true",)
     subparsers = parser.add_subparsers(help="subcommand help")
 
     parser_start = subparsers.add_parser("start", formatter_class=argparse.ArgumentDefaultsHelpFormatter, help="start help")
@@ -139,6 +151,8 @@ def main():
 
     parser_start.set_defaults(func=handle_start)
 
+    parser_bug = subparsers.add_parser("bug", )
+    parser_bug.set_defaults(func=handle_bug)
     parser_stop = subparsers.add_parser("stop", formatter_class=argparse.ArgumentDefaultsHelpFormatter, help="stop help")
     parser_stop.add_argument('job_name', action="store", type=str, help='job name')
     add_arguments(parser_stop)
@@ -153,6 +167,7 @@ def main():
     add_arguments(parser_list)
     parser_list.set_defaults(func=handle_list)
 
+    global args
     args = parser.parse_args()
     sys.exit(args.func(args))
 

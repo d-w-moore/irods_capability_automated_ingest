@@ -26,7 +26,15 @@ import socket
 from celery.signals import before_task_publish, after_task_publish, task_prerun, task_postrun, task_retry, task_success, task_failure, task_revoked, task_unknown, task_rejected
 from billiard import current_process
 
-import re
+import re,logging
+
+# -- dwm - probably do not need
+#
+# @task_revoked.connect()
+# def task_revoke(**kw):
+#    logger = logging.getLogger()
+#    logger.warning("-- TASK_REVOKE -- %r" % kw) 
+
 
 @task_prerun.connect()
 def task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):
@@ -534,7 +542,6 @@ def restart(meta):
 
 
 def start_synchronization(data):
-
     config = data["config"]
     logging_config = config["log"]
     root = data["root"]
@@ -593,9 +600,11 @@ def start_synchronization(data):
 
         store_event_handler(data_copy)
 
+    # -- dwm -- call setup_job 
+    #importlib.import_module(data_copy["event_handler"])
+
     if interval is not None:
         r.rpush("periodic", job_name.encode("utf-8"))
-
         restart.s(data_copy).apply_async(queue=restart_queue, task_id=job_name)
     else:
         r.rpush("singlepass", job_name.encode("utf-8"))
