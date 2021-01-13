@@ -1,0 +1,79 @@
+--------------------------------------------------
+irods_sync - Top level / cmdline functionality
+--------------------------------------------------
+
+provides:
+
+    get_config
+    get_celery_broker_info
+    handle_*() function entrypoints for * in( start, stop, list, watch )
+
+    main() function:
+        parses command-line options, subcommands.
+        executes the subcommand via one of the handle_* entry-points
+        the most importand of these, handle_start(), calls start_synchronization
+
+------------------------------------------------------------
+sync_task - main entrypoints and asynchronous scanning tasks
+------------------------------------------------------------
+
+class IrodsTask provides:
+    - encapsulation of a Celery task via a function decorator
+    - three celery event hooks named "on_XXXXX"[ XXXXX in (failure,retry,success) ]
+    - after_return() celery hook
+
+[@IrodsTask] sync_path():
+    - walks a path top down, invokes dir scans invokes leaf-first recursion
+    - handles S3 as well as the POSIX filesystem case
+        * forms an iterator for the directory tree
+    - iterates over contained files in chunks of meta[], as well as contained subdirectories
+        * asynchronously calls itself, recursively, for subdirectories
+           -  calls sync_files [async] for each chunk of size (files_per_task) gathered during iteration
+           -  calls sync_dir [celery task] for each subpath before calling itself (sync_path) asynchronously
+
+[@IrodsTask] sync_files():
+                 calls sync_entry() on each element of meta[chunk] (a list of files)
+
+[@IrodsTask] sync_dir():
+                 calls sync_entry() for one directory / collection
+
+sync_entry():
+    syncs the data and metadata for an object as appropriate for mtime and cache non-/use
+    relies on (passed-in) functions sync_[(meta|)data]_from_[(file|dir)] from 'sync_irods' module
+
+start_synchronization()
+  makes (synch-,asynch-)ronous call to restart() as requested by command line
+
+init()
+restart()    - called asynchronously by start_synchronization()
+   - entrypoint for starting / making tasks periodic and calling pre/post-job at appropriate times
+interrupt()
+cleanup()
+
+--------------------------------------------------
+sync_irods - irods utility functions
+--------------------------------------------------
+
+  create_dirs - calls self to create recursive collection hierarchies
+                (use Redis  locks to avoid colliding with other tasks)
+
+  create_dir - low level function called by create_dirs() per colln to be
+               individually created and logged
+
+  sync_file()
+    does an append-style put
+
+  register_file()
+
+  upload_file()
+    does a ( file -> data-object ) put
+
+----------------------------------------------------
+core - dataobj / coll hookd and client PEP-style fns
+----------------------------------------------------
+
+provides the Core base class providing four hooks
+    each hook named: " on_ (data_obj | coll) _ (create | modify) ":
+        each calls a passed-in func parameter on (*args and **options) and
+        directly invokes pre-and-post client side "PEPs"
+
