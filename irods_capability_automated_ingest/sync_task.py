@@ -104,7 +104,7 @@ class RestartTask(app.Task):
         logger.error('failed_restart', path=meta["path"], job_name=job_name, task_id=task_id, exc=exc, einfo=einfo, traceback=traceback.extract_tb(exc.__traceback__))
 
 
-def async(r, logger, task, meta, queue):
+def celery_async(r, logger, task, meta, queue):
     job_name = meta["job_name"]
     if get_with_key(r, stop_key, job_name, str) is None:
         logger.info('incr_job_name', task=meta["task"], path=meta["path"], job_name=job_name)
@@ -304,7 +304,7 @@ def sync_path(self, meta):
             itr = client.list_objects_v2(bucket_name, prefix=prefix, recursive=True)
 
         else:
-            async(r, logger, sync_dir, meta, file_q_name)
+            celery_async(r, logger, sync_dir, meta, file_q_name)
             itr = scandir(path)
 
         if meta["profile"]:
@@ -346,7 +346,7 @@ def sync_path(self, meta):
                     sync_dir_meta['path'] = full_path
                     sync_dir_meta['mtime'] = obj.stat(follow_symlinks=False).st_mtime
                     sync_dir_meta['ctime'] = obj.stat(follow_symlinks=False).st_ctime
-                    async(r, logger, sync_path, sync_dir_meta, path_q_name)
+                    celery_async(r, logger, sync_path, sync_dir_meta, path_q_name)
                     continue
 
                 obj_stats['is_link'] = obj.is_symlink()
@@ -363,13 +363,13 @@ def sync_path(self, meta):
             if len(chunk) >= files_per_task:
                 sync_files_meta = meta.copy()
                 sync_files_meta['chunk'] = chunk
-                async(r, logger, sync_files, sync_files_meta, file_q_name)
+                celery_async(r, logger, sync_files, sync_files_meta, file_q_name)
                 chunk.clear()
 
         if len(chunk) > 0:
             sync_files_meta = meta.copy()
             sync_files_meta['chunk'] = chunk
-            async(r, logger, sync_files, sync_files_meta, file_q_name)
+            celery_async(r, logger, sync_files, sync_files_meta, file_q_name)
             chunk.clear()
 
     except Exception as err:
@@ -521,7 +521,7 @@ def restart(meta):
             init(r, job_name)
             meta = meta.copy()
             meta["task"] = "sync_path"
-            async(r, logger, sync_path, meta, path_q_name)
+            celery_async(r, logger, sync_path, meta, path_q_name)
         else:
             logger.info("queue not empty or worker busy")
 
