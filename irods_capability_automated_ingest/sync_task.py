@@ -82,17 +82,17 @@ class IrodsTask(app.Task):
         logger.info('decr_job_name', task=meta["task"], path=meta["path"], job_name=job_name, task_id=task_id, retval=retval)
 
         r = get_redis(config)
-        done = retry(logger, decr_with_key, r, tasks_key, job_name) == 0 and not retry(logger, periodic, r, job_name)
-        if done:
-            retry(logger, cleanup, r, job_name)
 
+        done = (0 == retry(logger, decr_with_key, r, tasks_key, job_name))
+
+        if done and not retry(logger, periodic, r, job_name):
+            retry(logger, cleanup, r, job_name)
         r.rpush(dequeue_key(job_name), task_id)
 
         if done:
             hdlr_mod = get_hdlr_mod(meta)
             if hdlr_mod is not None and hasattr(hdlr_mod, "post_job"):
                 hdlr_mod.post_job(hdlr_mod, logger, meta)
-
 
 class RestartTask(app.Task):
 
@@ -501,17 +501,20 @@ def restart(meta):
     interval = meta["interval"]
     config = meta["config"]
     logging_config = config["log"]
-    if interval is not None:
-        restart.s(meta).apply_async(task_id=job_name, queue=restart_queue, countdown=interval)
 
     logger = sync_logging.get_sync_logger(logging_config)
-
     hdlr_mod = get_hdlr_mod(meta)
 
     try:
-
         if hdlr_mod is not None and hasattr(hdlr_mod, "pre_job"):
             hdlr_mod.pre_job(hdlr_mod, logger, meta)
+    except Exception as e:
+        logger.info( "Ignoring exception raised in pre_job() : {!r}".format(e))
+
+    if interval is not None:
+        restart.s(meta).apply_async(task_id=job_name, queue=restart_queue, countdown=interval)
+
+    try:
         logger.info("***************** restart *****************")
         r = get_redis(config)
 
