@@ -8,6 +8,11 @@ provides:
     get_celery_broker_info
     handle_*() function entrypoints for * in( start, stop, list, watch )
 
+    a python object , called "meta", essentially a key-value store.  It is a shallow hierarchy
+    containing mostly string values, built from configuration data and command line options. It 
+    is copied and serialized as necessary to distribute information amongst the various "task"
+    processes.
+    
     main() function:
         parses command-line options, subcommands.
         executes the subcommand via one of the handle_* entry-points
@@ -28,7 +33,8 @@ class IrodsTask provides:
     - walks a path top down, invokes dir scans invokes leaf-first recursion
     - handles S3 as well as the POSIX filesystem case
         * forms an iterator for the directory tree
-    - iterates over contained files in chunks of meta[], as well as contained subdirectories
+    - iterates over contained files in "chunk" (part of the "meta" dictionary param), as well as contained 
+      subdirectories
         * asynchronously calls itself, recursively, for subdirectories
            -  calls sync_files [async] for each chunk of size (files_per_task) gathered during iteration
            -  calls sync_dir [celery task] for each subpath before calling itself (sync_path) asynchronously
