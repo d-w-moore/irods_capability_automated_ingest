@@ -20,6 +20,8 @@ sync_task - main entrypoints and asynchronous scanning tasks
 class IrodsTask provides:
     - encapsulation of a Celery task via a function decorator
     - three celery event hooks named "on_XXXXX"[ XXXXX in (failure,retry,success) ]
+       * for each task / task_id spawned in sync_path, the **failure** or **success** is collected first
+         and then **after_return** is called
     - after_return() celery hook
 
 [@IrodsTask] sync_path():
