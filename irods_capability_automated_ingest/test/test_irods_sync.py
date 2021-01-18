@@ -527,15 +527,15 @@ class Test_pre_and_post_job(automated_ingest_test_context, unittest.TestCase):
             lines = f.readlines()
             self.assertEqual(lines, ["pre_job"])
 
-    def test_periodic_pre_and_post(self )
+    def test_periodic_pre_and_post(self):
         job_name = 'test_post_job.do_post_job'
-        self.do_periodic_pre_and_post( 
+        self.do_periodic_pre_and_post(
             "irods_capability_automated_ingest.examples.pre_and_post_job",
             job_name = job_name)
 
     def do_periodic_pre_and_post(self, eh, interval = "6", total_wait = "16", job_name = DEFAULT_JOB_NAME):
-        proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "start", 
-                                    PATH_TO_SOURCE_DIR, PATH_TO_COLLECTION, "--event_handler", eh, 
+        proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "start",
+                                    PATH_TO_SOURCE_DIR, PATH_TO_COLLECTION, "--event_handler", eh,
                                     "--job_name", job_name, "--log_level", "INFO", '--files_per_task', '1',
                                     "--interval",interval])
         proc.wait()
