@@ -551,7 +551,7 @@ class Test_pre_and_post_job(automated_ingest_test_context, unittest.TestCase):
                 count += 1
             self.assertGreater(count, 1)
 
-        proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "stop", job_name)
+        proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "stop", job_name])
         proc.wait()
 
     def do_post_job(self, eh, job_name = DEFAULT_JOB_NAME):
