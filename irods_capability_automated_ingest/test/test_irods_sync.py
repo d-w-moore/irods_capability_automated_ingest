@@ -13,6 +13,7 @@ from os.path import join, realpath, getmtime, getsize, dirname, basename, relpat
 from irods.session import iRODSSession
 from irods.models import Collection, DataObject
 from tempfile import NamedTemporaryFile, mkdtemp
+from contextlib import contextmanager as ctx_mgr
 from datetime import datetime
 from irods_capability_automated_ingest.sync_utils import size, get_with_key, app, failures_key, retries_key
 from irods_capability_automated_ingest.sync_utils import get_redis as sync_utils_get_redis
@@ -139,8 +140,14 @@ def start_workers(n, args=[]):
     workers = subprocess.Popen(["celery", "-A", "irods_capability_automated_ingest.sync_task", "worker", "-c", str(n), "-l", "info", "-Q", "restart,path,file"] + args)
     return workers
 
+def freewheel_with_auto_cleanup (workers): 
+    try:
+        yield None
+    finally:
+        workers.send_signal(SIGINT)
+        workers.wait()
 
-def wait_for(workers, job_name = DEFAULT_JOB_NAME):
+def wait_for(workers, job_name = DEFAULT_JOB_NAME, let_workers_run = False):
     r = get_redis()
     t0 = time.time()
     while TIMEOUT is None or time.time() - t0 < TIMEOUT:
@@ -151,6 +158,10 @@ def wait_for(workers, job_name = DEFAULT_JOB_NAME):
             active = 0
         else:
             active = sum(map(len, act.values()))
+        if let_workers_run and (active > 0 or restart > 0):
+            # with wait_for(workers, let_workers_run=True):
+            #   do_stuff_that_requires_workers()
+            return ctx_mgr(freewheel_with_auto_cleanup)(workers)
         d = done(r, job_name)
         if restart != 0 or active != 0 or not d:
             time.sleep(1)
@@ -515,6 +526,33 @@ class Test_pre_and_post_job(automated_ingest_test_context, unittest.TestCase):
         with open(LOG_FILE,"r") as f:
             lines = f.readlines()
             self.assertEqual(lines, ["pre_job"])
+
+    def test_periodic_pre_and_post(self )
+        job_name = 'test_post_job.do_post_job'
+        self.do_periodic_pre_and_post( 
+            "irods_capability_automated_ingest.examples.pre_and_post_job",
+            job_name = job_name)
+
+    def do_periodic_pre_and_post(self, eh, interval = "6", total_wait = "16", job_name = DEFAULT_JOB_NAME):
+        proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "start", 
+                                    PATH_TO_SOURCE_DIR, PATH_TO_COLLECTION, "--event_handler", eh, 
+                                    "--job_name", job_name, "--log_level", "INFO", '--files_per_task', '1',
+                                    "--interval",interval])
+        proc.wait()
+        workers = start_workers(1)
+
+        with wait_for(workers, job_name, let_workers_run = True):
+            time.sleep(int(total_wait))
+
+        with open(LOG_FILE,"r") as f:
+            count = 0
+            for line in f.readlines():
+                self.assertEqual(line, "{}_job".format(["pre","post"][count%2]))
+                count += 1
+            self.assertGreater(count, 1)
+
+        proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "stop", job_name)
+        proc.wait()
 
     def do_post_job(self, eh, job_name = DEFAULT_JOB_NAME):
         proc = subprocess.Popen(["python", "-m", IRODS_SYNC_PY, "start", PATH_TO_SOURCE_DIR, PATH_TO_COLLECTION, "--event_handler", eh, "--job_name", job_name, "--log_level", "INFO", '--files_per_task', '1'])
